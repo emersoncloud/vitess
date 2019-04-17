@@ -19,6 +19,7 @@ package grpcvtgateservice
 
 import (
 	"flag"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -28,6 +29,7 @@ import (
 	"vitess.io/vitess/go/sqltypes"
 	"vitess.io/vitess/go/vt/callerid"
 	"vitess.io/vitess/go/vt/callinfo"
+	"vitess.io/vitess/go/vt/log"
 	"vitess.io/vitess/go/vt/servenv"
 	"vitess.io/vitess/go/vt/topo/topoproto"
 	"vitess.io/vitess/go/vt/vterrors"
@@ -100,6 +102,7 @@ func withCallerIDContext(ctx context.Context, effectiveCallerID *vtrpcpb.CallerI
 // Execute is the RPC version of vtgateservice.VTGateService method
 func (vtg *VTGate) Execute(ctx context.Context, request *vtgatepb.ExecuteRequest) (response *vtgatepb.ExecuteResponse, err error) {
 	defer vtg.server.HandlePanic(&err)
+	requestStartTime := time.Now()
 	ctx = withCallerIDContext(ctx, request.CallerId)
 
 	// Handle backward compatibility.
@@ -114,11 +117,15 @@ func (vtg *VTGate) Execute(ctx context.Context, request *vtgatepb.ExecuteRequest
 		session.Options = request.Options
 	}
 	session, result, err := vtg.server.Execute(ctx, session, request.Query.Sql, request.Query.BindVariables)
-	return &vtgatepb.ExecuteResponse{
+	requestResult := &vtgatepb.ExecuteResponse{
 		Result:  sqltypes.ResultToProto3(result),
 		Session: session,
 		Error:   vterrors.ToVTRPC(err),
-	}, nil
+	}
+	totalRequestTime := time.Now().Sub(requestStartTime)
+	vtgate.TimingStatistics.RecordRequestTime(totalRequestTime)
+	log.Infof("Request took %d ns for query %s", totalRequestTime.Nanoseconds(), request.Query.Sql)
+	return requestResult, nil
 }
 
 // ExecuteBatch is the RPC version of vtgateservice.VTGateService method

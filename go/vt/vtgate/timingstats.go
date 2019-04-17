@@ -29,6 +29,7 @@ import (
 
 type TimingStats struct {
 	totalQueryTime prometheus.Summary
+	totalRequestTime prometheus.Summary
 }
 
 type TimingMeasurement struct {
@@ -38,6 +39,7 @@ type TimingMeasurement struct {
 
 type TimingMeasurements struct {
 	TotalQueryTime TimingMeasurement
+	TotalRequestTime TimingMeasurement
 }
 
 var (
@@ -46,8 +48,16 @@ var (
 			Name:       "total_query_time",
 			Help:       "Distributions of total time for vttablet queries.",
 			Objectives: map[float64]float64{0.5: 0.05, 0.99: 0.001},
-			MaxAge:     time.Minute})}
-	timingStatsEnabled = flag.Bool("enable-aggregate-query-timings", false, "This enables median and 99th timings for all queries.")
+			MaxAge:     time.Minute,
+		        BufCap:     6000}),
+	totalRequestTime: prometheus.NewSummary(
+		prometheus.SummaryOpts{
+			Name:       "total_query_time",
+			Help:       "Distributions of total time for vttablet queries.",
+			Objectives: map[float64]float64{0.5: 0.05, 0.99: 0.001},
+			MaxAge:     time.Minute,
+		        BufCap:     6000})}
+	timingStatsEnabled = flag.Bool("enable-aggregate-vttablet-timings", false, "This enables median and 99th timings for all queries.")
 
 	publishOnce sync.Once
 )
@@ -56,6 +66,13 @@ func (timingStats *TimingStats) recordStats(logStats *LogStats) {
 	if *timingStatsEnabled {
 		timingStats.registerIfNeeded()
 		timingStats.totalQueryTime.Observe(float64(logStats.TotalTime().Nanoseconds()))
+	}
+}
+
+func (timingStats *TimingStats) RecordRequestTime(requestTime time.Duration) {
+	if *timingStatsEnabled {
+		timingStats.registerIfNeeded()
+		timingStats.totalRequestTime.Observe(float64(requestTime.Nanoseconds()))
 	}
 }
 
@@ -69,7 +86,8 @@ func (timingStats *TimingStats) GetMeasurementsJson() string {
 }
 
 func (timingStats *TimingStats) GetMeasurements() TimingMeasurements {
-	return TimingMeasurements{TotalQueryTime: getMeasurement(timingStats.totalQueryTime)}
+	return TimingMeasurements{TotalQueryTime: getMeasurement(timingStats.totalQueryTime),
+		TotalRequestTime: getMeasurement(timingStats.totalRequestTime)}
 }
 
 func (timingStats *TimingStats) registerIfNeeded() {
