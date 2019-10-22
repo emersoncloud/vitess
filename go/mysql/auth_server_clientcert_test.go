@@ -98,6 +98,69 @@ func TestValidCert(t *testing.T) {
 	conn.writeComQuit()
 }
 
+func TestMismatchedUser(t *testing.T) {
+	th := &testHandler{}
+
+	authServer := &AuthServerClientCert{
+		Method: MysqlClearPassword,
+	}
+
+	// Create the listener, so we can get its host.
+	l, err := NewListener("tcp", ":0", authServer, th, 0, 0)
+	if err != nil {
+		t.Fatalf("NewListener failed: %v", err)
+	}
+	defer l.Close()
+	host := l.Addr().(*net.TCPAddr).IP.String()
+	port := l.Addr().(*net.TCPAddr).Port
+
+	// Create the certs.
+	root, err := ioutil.TempDir("", "TestSSLConnection")
+	if err != nil {
+		t.Fatalf("TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(root)
+	tlstest.CreateCA(root)
+	tlstest.CreateSignedCert(root, tlstest.CA, "01", "server", "server.example.com")
+	tlstest.CreateSignedCert(root, tlstest.CA, "02", "client", clientCertUsername)
+
+	// Create the server with TLS config.
+	serverConfig, err := vttls.ServerConfig(
+		path.Join(root, "server-cert.pem"),
+		path.Join(root, "server-key.pem"),
+		path.Join(root, "ca-cert.pem"))
+	if err != nil {
+		t.Fatalf("TLSServerConfig failed: %v", err)
+	}
+	l.TLSConfig = serverConfig
+	go func() {
+		l.Accept()
+	}()
+
+	// Setup the right parameters.
+	params := &ConnParams{
+		Host:  host,
+		Port:  port,
+		Uname: clientCertUsername + " But Different Username",
+		Pass:  "",
+		// SSL flags.
+		Flags:      CapabilityClientSSL,
+		SslCa:      path.Join(root, "ca-cert.pem"),
+		SslCert:    path.Join(root, "client-cert.pem"),
+		SslKey:     path.Join(root, "client-key.pem"),
+		ServerName: "server.example.com",
+	}
+
+	ctx := context.Background()
+	conn, err := Connect(ctx, params)
+	if err == nil {
+		t.Fatalf("Connect() should have failed")
+	}
+	if conn != nil {
+		conn.Close()
+	}
+}
+
 func TestNoCert(t *testing.T) {
 	th := &testHandler{}
 
